@@ -20,7 +20,7 @@ export const localBirdCatalog: Record<string, BirdSpecies> = {
       {
         recId: 'XC76509',
         type: 'call',
-        assetId: require('../../assets/audio/black-capped_chickadee _xc76509_call.mp3'),
+        assetId: require('../../assets/audio/black-capped_chickadee_xc76509_call.mp3'),
         license: 'CC BY-NC-ND 2.5',
         title: 'Black-capped Chickadee (XC76509)',
         recordist: 'Andrew Spencer',

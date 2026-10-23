@@ -57,7 +57,7 @@ export const localBirdCatalog: Record<string, BirdSpecies> = {
       {
         recId: 'XC391461',
         type: 'imitation',
-        assetId: require('../../assets/audio/blue-jay_xc391461_imitation.mp3'),
+        assetId: require('../../assets/audio/blue_jay_xc391461_imitation.mp3'),
         license: 'CC BY-NC-ND 4.0',
         title: 'Blue Jay (XC391461)',
         recordist: 'Peter Boesman',
@@ -187,10 +187,10 @@ export const localBirdCatalog: Record<string, BirdSpecies> = {
 };
 
 // Helper function to simulate the future API we will build
-// export function getBirdById(id: string): BirdSpecies | undefined {
-//   return localBirdCatalog[id];
-// }
+export function getBirdById(id: string): BirdSpecies | undefined {
+  return localBirdCatalog[id];
+}
 
-// export function getAllBirds(): BirdSpecies[] {
-//   return Object.values(localBirdCatalog);
-// }
+export function getAllBirds(): BirdSpecies[] {
+  return Object.values(localBirdCatalog);
+}

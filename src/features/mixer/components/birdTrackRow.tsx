@@ -15,6 +15,7 @@ interface BirdTrackRowProps {
   species: BirdSpecies;
   trackState?: BirdTrackState;
   isFavorite: boolean;
+  isHighlighted?: boolean;
   onToggleFavorite: (speciesId: string) => void;
   onStart: (speciesId: string, recording: Recording) => void;
   onPause: (speciesId: string) => void;
@@ -27,6 +28,7 @@ export function BirdTrackRow({
   species,
   trackState,
   isFavorite,
+  isHighlighted = false,
   onToggleFavorite,
   onStart,
   onPause,
@@ -38,7 +40,6 @@ export function BirdTrackRow({
     trackState?.activeRecId ?? species.recordings[0]?.recId ?? ''
   );
 
-  // Keep selected clip synced if card remounts when moving between sections
   useEffect(() => {
     if (trackState?.activeRecId) {
       setSelectedRecId(trackState.activeRecId);
@@ -78,7 +79,6 @@ export function BirdTrackRow({
     }
   };
 
-  // Horizontal Slider state & refs
   const sliderWidthRef = useRef<number>(1);
   const grantXRef = useRef<number>(0);
 
@@ -117,6 +117,7 @@ export function BirdTrackRow({
         styles.card,
         isPlaying && styles.cardPlaying,
         isPaused && styles.cardPaused,
+        isHighlighted && styles.cardHighlighted,
       ]}
     >
       {/* Top Row: Bird Info, Status Badge & Favorite Button */}
@@ -295,6 +296,11 @@ const styles = StyleSheet.create({
   cardPaused: {
     borderColor: '#d97706',
     backgroundColor: '#fffdf9',
+  },
+  cardHighlighted: {
+    borderColor: '#40916c',
+    borderWidth: 2.5,
+    backgroundColor: '#e9f5ee',
   },
   headerRow: {
     flexDirection: 'row',

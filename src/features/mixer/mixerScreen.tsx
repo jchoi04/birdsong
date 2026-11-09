@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Animated,
   PanResponder,
@@ -29,8 +29,21 @@ export function MixerScreen() {
   const { height: windowHeight } = useWindowDimensions();
   const birds = useMemo(() => getAllBirds(), []);
 
-  // Track favorited species IDs
+  const sectionListRef = useRef<SectionList<BirdSpecies, BirdSection>>(null);
+  const highlightTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   const [favoriteIds, setFavoriteIds] = useState<string[]>([]);
+  const [highlightedSpeciesId, setHighlightedSpeciesId] = useState<string | null>(
+    null
+  );
+
+  useEffect(() => {
+    return () => {
+      if (highlightTimeoutRef.current) {
+        clearTimeout(highlightTimeoutRef.current);
+      }
+    };
+  }, []);
 
   const toggleFavorite = useCallback((speciesId: string) => {
     setFavoriteIds((prev) =>
@@ -50,7 +63,6 @@ export function MixerScreen() {
     setTrackVolume,
   } = useAudioClipController(() => new ReactNativeAudioEngine());
 
-  // Build sections: Favorites on top, non-favorited birds in General below
   const sections = useMemo<BirdSection[]>(() => {
     const favoriteBirds = birds.filter((b) =>
       favoriteIds.includes(b.speciesId)
@@ -89,7 +101,6 @@ export function MixerScreen() {
     [birds, tracks]
   );
 
-  // SwiftUI-like .sheet() detents (translateY from top of screen)
   const detents = useMemo(() => {
     const large = Math.max(80, Math.round(windowHeight * 0.12));
     const medium = Math.round(windowHeight * 0.46);
@@ -116,6 +127,50 @@ export function MixerScreen() {
       }).start();
     },
     [detents, translateY]
+  );
+
+  // Finds the bird's section & item index, expands the sheet if needed, and scrolls to it
+  const jumpToBirdCard = useCallback(
+    (speciesId: string) => {
+      let targetSectionIndex = -1;
+      let targetItemIndex = -1;
+
+      for (let sIdx = 0; sIdx < sections.length; sIdx++) {
+        const iIdx = sections[sIdx].data.findIndex(
+          (b) => b.speciesId === speciesId
+        );
+        if (iIdx !== -1) {
+          targetSectionIndex = sIdx;
+          targetItemIndex = iIdx;
+          break;
+        }
+      }
+
+      if (targetSectionIndex === -1 || targetItemIndex === -1) return;
+
+      // Expand sheet to medium if it is currently minimized ('peek')
+      if (currentDetent === 'peek') {
+        snapToDetent('medium');
+      }
+
+      // Scroll the SectionList to that specific card
+      sectionListRef.current?.scrollToLocation({
+        sectionIndex: targetSectionIndex,
+        itemIndex: targetItemIndex,
+        viewOffset: 16,
+        animated: true,
+      });
+
+      // Highlight the card briefly so the user sees it immediately
+      setHighlightedSpeciesId(speciesId);
+      if (highlightTimeoutRef.current) {
+        clearTimeout(highlightTimeoutRef.current);
+      }
+      highlightTimeoutRef.current = setTimeout(() => {
+        setHighlightedSpeciesId(null);
+      }, 1500);
+    },
+    [currentDetent, sections, snapToDetent]
   );
 
   const cycleDetent = useCallback(() => {
@@ -209,11 +264,15 @@ export function MixerScreen() {
                 const track = tracks[bird.speciesId];
                 const isPaused = track?.status === 'paused';
                 return (
-                  <View
+                  <Pressable
                     key={bird.speciesId}
-                    style={[
+                    accessibilityRole="button"
+                    accessibilityLabel={`Jump to ${bird.displayName} controls`}
+                    onPress={() => jumpToBirdCard(bird.speciesId)}
+                    style={({ pressed }) => [
                       styles.sceneBirdPill,
                       isPaused && styles.sceneBirdPillPaused,
+                      pressed && styles.sceneBirdPillPressed,
                     ]}
                   >
                     <View
@@ -230,7 +289,7 @@ export function MixerScreen() {
                         ? 'PAUSED'
                         : `${Math.round((track?.volume ?? 0.8) * 100)}%`}
                     </Text>
-                  </View>
+                  </Pressable>
                 );
               })}
             </View>
@@ -268,7 +327,7 @@ export function MixerScreen() {
               <Text style={styles.sheetSubtitle}>
                 {activeBirds.length === 0
                   ? 'Layer birds into the scene'
-                  : `${activeBirds.length} active in scene`}
+                  : `${activeBirds.length} active • Tap a bird above to jump to card`}
               </Text>
             </View>
 
@@ -300,12 +359,23 @@ export function MixerScreen() {
           </View>
         </View>
 
-        {/* Categorized Vertical Scroll List (Favorites on top, General below) */}
+        {/* Categorized Vertical Scroll List */}
         <SectionList
+          ref={sectionListRef}
           sections={sections}
           keyExtractor={(item) => item.speciesId}
           stickySectionHeadersEnabled={false}
           contentContainerStyle={styles.listContent}
+          onScrollToIndexFailed={(info) => {
+            // Fallback if target card hasn't been measured yet
+            setTimeout(() => {
+              sectionListRef.current?.scrollToLocation({
+                sectionIndex: info.index,
+                itemIndex: 0,
+                animated: true,
+              });
+            }, 100);
+          }}
           renderSectionHeader={({ section }) => (
             <View style={styles.sectionHeader}>
               <Text style={styles.sectionTitle}>{section.title}</Text>
@@ -317,6 +387,7 @@ export function MixerScreen() {
               species={item}
               trackState={tracks[item.speciesId]}
               isFavorite={favoriteIds.includes(item.speciesId)}
+              isHighlighted={highlightedSpeciesId === item.speciesId}
               onToggleFavorite={toggleFavorite}
               onStart={playTrack}
               onPause={pauseTrack}
@@ -411,6 +482,10 @@ const styles = StyleSheet.create({
   },
   sceneBirdPillPaused: {
     borderColor: 'rgba(251, 191, 36, 0.5)',
+  },
+  sceneBirdPillPressed: {
+    opacity: 0.75,
+    transform: [{ scale: 0.97 }],
   },
   liveDot: {
     width: 8,

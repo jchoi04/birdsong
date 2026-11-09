@@ -165,7 +165,7 @@ export const localBirdCatalog: Record<string, BirdSpecies> = {
       {
         recId: 'XC29512',
         type: 'atypical song',
-        assetId: require('../../assets/audio/tufted_titmouse_xc29512_atypical song.mp3'),
+        assetId: require('../../assets/audio/tufted_titmouse_xc29512_atypical_song.mp3'),
         license: 'CC BY-NC-ND 2.5',
         title: 'Tufted Titmouse (XC29512)',
         recordist: 'Andrew Spencer',

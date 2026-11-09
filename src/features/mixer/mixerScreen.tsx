@@ -1,19 +1,44 @@
-import React, { useMemo } from 'react';
+import React, { useCallback, useMemo, useRef, useState } from 'react';
 import {
-  FlatList,
+  Animated,
+  PanResponder,
   Pressable,
   SafeAreaView,
+  SectionList,
   StyleSheet,
   Text,
+  useWindowDimensions,
   View,
 } from 'react-native';
 import { getAllBirds } from '../../data/birdCatalog';
+import { BirdSpecies } from '../../domain/bird';
 import { useAudioClipController } from '../../audio/audioEngine';
 import { ReactNativeAudioEngine } from '../../audio/ReactNativeAudioEngine';
 import { BirdTrackRow } from './components/birdTrackRow';
 
+type SheetDetent = 'peek' | 'medium' | 'large';
+
+interface BirdSection {
+  key: 'favorites' | 'general';
+  title: string;
+  subtitle: string;
+  data: BirdSpecies[];
+}
+
 export function MixerScreen() {
+  const { height: windowHeight } = useWindowDimensions();
   const birds = useMemo(() => getAllBirds(), []);
+
+  // Track favorited species IDs
+  const [favoriteIds, setFavoriteIds] = useState<string[]>([]);
+
+  const toggleFavorite = useCallback((speciesId: string) => {
+    setFavoriteIds((prev) =>
+      prev.includes(speciesId)
+        ? prev.filter((id) => id !== speciesId)
+        : [...prev, speciesId]
+    );
+  }, []);
 
   const {
     tracks,
@@ -25,103 +50,321 @@ export function MixerScreen() {
     setTrackVolume,
   } = useAudioClipController(() => new ReactNativeAudioEngine());
 
-  const activeCount = useMemo(
+  // Build sections: Favorites on top, non-favorited birds in General below
+  const sections = useMemo<BirdSection[]>(() => {
+    const favoriteBirds = birds.filter((b) =>
+      favoriteIds.includes(b.speciesId)
+    );
+    const generalBirds = birds.filter(
+      (b) => !favoriteIds.includes(b.speciesId)
+    );
+
+    return [
+      {
+        key: 'favorites',
+        title: `Favorites (${favoriteBirds.length})`,
+        subtitle:
+          favoriteBirds.length === 0
+            ? 'Tap ♡ on any bird card below to pin it to your Favorites'
+            : 'Pinned for quick access',
+        data: favoriteBirds,
+      },
+      {
+        key: 'general',
+        title: `General (${generalBirds.length})`,
+        subtitle: 'All other birds in catalog',
+        data: generalBirds,
+      },
+    ];
+  }, [birds, favoriteIds]);
+
+  const activeBirds = useMemo(
     () =>
-      Object.values(tracks).filter(
-        (t) =>
-          t.status === 'playing' ||
-          t.status === 'paused' ||
-          t.status === 'loading'
-      ).length,
-    [tracks]
+      birds.filter((b) => {
+        const status = tracks[b.speciesId]?.status;
+        return (
+          status === 'playing' || status === 'paused' || status === 'loading'
+        );
+      }),
+    [birds, tracks]
+  );
+
+  // SwiftUI-like .sheet() detents (translateY from top of screen)
+  const detents = useMemo(() => {
+    const large = Math.max(80, Math.round(windowHeight * 0.12));
+    const medium = Math.round(windowHeight * 0.46);
+    const peek = Math.round(windowHeight * 0.78);
+    return { large, medium, peek };
+  }, [windowHeight]);
+
+  const [currentDetent, setCurrentDetent] = useState<SheetDetent>('medium');
+  const translateY = useRef(new Animated.Value(detents.medium)).current;
+  const currentYRef = useRef<number>(detents.medium);
+  const dragStartYRef = useRef<number>(detents.medium);
+
+  const snapToDetent = useCallback(
+    (target: SheetDetent) => {
+      const toValue = detents[target];
+      currentYRef.current = toValue;
+      setCurrentDetent(target);
+      Animated.spring(translateY, {
+        toValue,
+        useNativeDriver: true,
+        damping: 22,
+        stiffness: 180,
+        mass: 0.8,
+      }).start();
+    },
+    [detents, translateY]
+  );
+
+  const cycleDetent = useCallback(() => {
+    if (currentDetent === 'peek') {
+      snapToDetent('medium');
+    } else if (currentDetent === 'medium') {
+      snapToDetent('large');
+    } else {
+      snapToDetent('medium');
+    }
+  }, [currentDetent, snapToDetent]);
+
+  const sheetPanResponder = useMemo(
+    () =>
+      PanResponder.create({
+        onStartShouldSetPanResponder: () => false,
+        onMoveShouldSetPanResponder: (_, gestureState) =>
+          Math.abs(gestureState.dy) > 5,
+        onPanResponderGrant: () => {
+          dragStartYRef.current = currentYRef.current;
+        },
+        onPanResponderMove: (_, gestureState) => {
+          const nextY = Math.max(
+            detents.large,
+            Math.min(detents.peek, dragStartYRef.current + gestureState.dy)
+          );
+          translateY.setValue(nextY);
+        },
+        onPanResponderRelease: (_, gestureState) => {
+          const projectedY =
+            dragStartYRef.current + gestureState.dy + gestureState.vy * 110;
+
+          const entries: [SheetDetent, number][] = [
+            ['large', detents.large],
+            ['medium', detents.medium],
+            ['peek', detents.peek],
+          ];
+
+          let closest: SheetDetent = 'medium';
+          let minDistance = Infinity;
+          for (const [name, pos] of entries) {
+            const dist = Math.abs(projectedY - pos);
+            if (dist < minDistance) {
+              minDistance = dist;
+              closest = name;
+            }
+          }
+          snapToDetent(closest);
+        },
+      }),
+    [detents, snapToDetent, translateY]
   );
 
   return (
-    <SafeAreaView style={styles.safeArea}>
-      <View style={styles.header}>
-        <View>
-          <Text style={styles.badge}>SOUNDSCAPE MIXER</Text>
-          <Text style={styles.headerTitle}>All Birds ({birds.length})</Text>
-          <Text style={styles.headerSubtitle}>
-            {activeCount === 0
-              ? 'Tap Start on multiple cards to layer looping sounds'
-              : `${activeCount} bird track${activeCount > 1 ? 's' : ''} active`}
-          </Text>
+    <View style={styles.root}>
+      {/* Background Scene Canvas */}
+      <SafeAreaView style={styles.sceneContainer}>
+        <View style={styles.sceneHeader}>
+          <View>
+            <Text style={styles.sceneBadge}>CURRENT SCENE</Text>
+            <Text style={styles.sceneTitle}>Woodland Canopy</Text>
+          </View>
+
+          {activeBirds.length > 0 && (
+            <Pressable
+              accessibilityRole="button"
+              onPress={stopAll}
+              style={({ pressed }) => [
+                styles.stopAllButton,
+                pressed && styles.buttonPressed,
+              ]}
+            >
+              <Text style={styles.stopAllText}>Stop All</Text>
+            </Pressable>
+          )}
         </View>
 
-        {activeCount > 0 && (
+        {/* Active Birds Visual Indicator in the Scene */}
+        <View style={styles.sceneStage}>
+          {activeBirds.length === 0 ? (
+            <View style={styles.emptySceneBox}>
+              <Text style={styles.emptySceneTitle}>Quiet Forest</Text>
+              <Text style={styles.emptySceneSubtitle}>
+                Pull up the bird sheet below and press Start on any bird to
+                build your soundscape.
+              </Text>
+            </View>
+          ) : (
+            <View style={styles.activeScenePills}>
+              {activeBirds.map((bird) => {
+                const track = tracks[bird.speciesId];
+                const isPaused = track?.status === 'paused';
+                return (
+                  <View
+                    key={bird.speciesId}
+                    style={[
+                      styles.sceneBirdPill,
+                      isPaused && styles.sceneBirdPillPaused,
+                    ]}
+                  >
+                    <View
+                      style={[
+                        styles.liveDot,
+                        isPaused && styles.liveDotPaused,
+                      ]}
+                    />
+                    <Text style={styles.sceneBirdPillName}>
+                      {bird.displayName}
+                    </Text>
+                    <Text style={styles.sceneBirdPillMeta}>
+                      {isPaused
+                        ? 'PAUSED'
+                        : `${Math.round((track?.volume ?? 0.8) * 100)}%`}
+                    </Text>
+                  </View>
+                );
+              })}
+            </View>
+          )}
+        </View>
+      </SafeAreaView>
+
+      {/* Pull-Up .sheet() Overlay */}
+      <Animated.View
+        style={[
+          styles.sheetContainer,
+          {
+            height: windowHeight - detents.large,
+            transform: [{ translateY }],
+          },
+        ]}
+      >
+        {/* Sheet Drag Handle + Header */}
+        <View
+          style={styles.sheetDragArea}
+          {...sheetPanResponder.panHandlers}
+        >
           <Pressable
             accessibilityRole="button"
-            onPress={stopAll}
-            style={({ pressed }) => [
-              styles.stopAllButton,
-              pressed && styles.stopAllPressed,
-            ]}
+            accessibilityLabel="Toggle sheet height"
+            onPress={cycleDetent}
+            style={styles.handleHitArea}
           >
-            <Text style={styles.stopAllText}>Stop All</Text>
+            <View style={styles.sheetHandleBar} />
           </Pressable>
-        )}
-      </View>
 
-      <FlatList
-        data={birds}
-        keyExtractor={(item) => item.speciesId}
-        contentContainerStyle={styles.listContent}
-        renderItem={({ item }) => (
-          <BirdTrackRow
-            species={item}
-            trackState={tracks[item.speciesId]}
-            onStart={playTrack}
-            onPause={pauseTrack}
-            onResume={resumeTrack}
-            onStop={stopTrack}
-            onVolumeChange={setTrackVolume}
-          />
-        )}
-      />
-    </SafeAreaView>
+          <View style={styles.sheetTopBar}>
+            <View>
+              <Text style={styles.sheetTitle}>Birds</Text>
+              <Text style={styles.sheetSubtitle}>
+                {activeBirds.length === 0
+                  ? 'Layer birds into the scene'
+                  : `${activeBirds.length} active in scene`}
+              </Text>
+            </View>
+
+            <View style={styles.detentButtonsRow}>
+              {(['peek', 'medium', 'large'] as SheetDetent[]).map((detent) => (
+                <Pressable
+                  key={detent}
+                  onPress={() => snapToDetent(detent)}
+                  style={[
+                    styles.detentPill,
+                    currentDetent === detent && styles.detentPillActive,
+                  ]}
+                >
+                  <Text
+                    style={[
+                      styles.detentPillText,
+                      currentDetent === detent && styles.detentPillTextActive,
+                    ]}
+                  >
+                    {detent === 'peek'
+                      ? 'Min'
+                      : detent === 'medium'
+                        ? 'Half'
+                        : 'Full'}
+                  </Text>
+                </Pressable>
+              ))}
+            </View>
+          </View>
+        </View>
+
+        {/* Categorized Vertical Scroll List (Favorites on top, General below) */}
+        <SectionList
+          sections={sections}
+          keyExtractor={(item) => item.speciesId}
+          stickySectionHeadersEnabled={false}
+          contentContainerStyle={styles.listContent}
+          renderSectionHeader={({ section }) => (
+            <View style={styles.sectionHeader}>
+              <Text style={styles.sectionTitle}>{section.title}</Text>
+              <Text style={styles.sectionSubtitle}>{section.subtitle}</Text>
+            </View>
+          )}
+          renderItem={({ item }) => (
+            <BirdTrackRow
+              species={item}
+              trackState={tracks[item.speciesId]}
+              isFavorite={favoriteIds.includes(item.speciesId)}
+              onToggleFavorite={toggleFavorite}
+              onStart={playTrack}
+              onPause={pauseTrack}
+              onResume={resumeTrack}
+              onStop={stopTrack}
+              onVolumeChange={setTrackVolume}
+            />
+          )}
+        />
+      </Animated.View>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
-  safeArea: {
+  root: {
     flex: 1,
-    backgroundColor: '#f4f6f4',
+    backgroundColor: '#1b4332',
   },
-  header: {
+  sceneContainer: {
+    flex: 1,
+  },
+  sceneHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
     paddingHorizontal: 20,
     paddingTop: 12,
-    paddingBottom: 14,
-    borderBottomWidth: 1,
-    borderBottomColor: '#e2e8e4',
   },
-  badge: {
+  sceneBadge: {
     fontSize: 11,
     fontWeight: '700',
-    color: '#2d6a4f',
-    letterSpacing: 1,
-    marginBottom: 2,
+    color: '#95d5b2',
+    letterSpacing: 1.2,
   },
-  headerTitle: {
-    fontSize: 24,
+  sceneTitle: {
+    fontSize: 26,
     fontWeight: '700',
-    color: '#1b4332',
-  },
-  headerSubtitle: {
-    fontSize: 13,
-    color: '#52796f',
+    color: '#ffffff',
     marginTop: 2,
   },
   stopAllButton: {
     backgroundColor: '#ae2012',
     paddingHorizontal: 14,
     paddingVertical: 8,
-    borderRadius: 8,
+    borderRadius: 999,
   },
-  stopAllPressed: {
+  buttonPressed: {
     opacity: 0.8,
   },
   stopAllText: {
@@ -129,8 +372,155 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: '700',
   },
+  sceneStage: {
+    paddingHorizontal: 20,
+    paddingTop: 28,
+  },
+  emptySceneBox: {
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+    borderRadius: 16,
+    padding: 20,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.15)',
+  },
+  emptySceneTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#d8f3dc',
+    marginBottom: 4,
+  },
+  emptySceneSubtitle: {
+    fontSize: 14,
+    color: '#b7e4c7',
+    lineHeight: 20,
+  },
+  activeScenePills: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 10,
+  },
+  sceneBirdPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(255, 255, 255, 0.16)',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: 'rgba(149, 213, 178, 0.4)',
+  },
+  sceneBirdPillPaused: {
+    borderColor: 'rgba(251, 191, 36, 0.5)',
+  },
+  liveDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: '#52b788',
+    marginRight: 8,
+  },
+  liveDotPaused: {
+    backgroundColor: '#fbbf24',
+  },
+  sceneBirdPillName: {
+    color: '#ffffff',
+    fontSize: 13,
+    fontWeight: '600',
+    marginRight: 8,
+  },
+  sceneBirdPillMeta: {
+    color: '#b7e4c7',
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  sheetContainer: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    top: 0,
+    backgroundColor: '#f4f6f4',
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    shadowColor: '#000',
+    shadowOpacity: 0.25,
+    shadowRadius: 16,
+    shadowOffset: { width: 0, height: -4 },
+    elevation: 12,
+    overflow: 'hidden',
+  },
+  sheetDragArea: {
+    backgroundColor: '#ffffff',
+    paddingHorizontal: 20,
+    paddingBottom: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: '#e2e8e4',
+  },
+  handleHitArea: {
+    alignItems: 'center',
+    paddingTop: 10,
+    paddingBottom: 8,
+  },
+  sheetHandleBar: {
+    width: 42,
+    height: 5,
+    borderRadius: 3,
+    backgroundColor: '#ced4da',
+  },
+  sheetTopBar: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  sheetTitle: {
+    fontSize: 20,
+    fontWeight: '700',
+    color: '#1b4332',
+  },
+  sheetSubtitle: {
+    fontSize: 12,
+    color: '#52796f',
+    marginTop: 2,
+  },
+  detentButtonsRow: {
+    flexDirection: 'row',
+    backgroundColor: '#eef2ef',
+    borderRadius: 8,
+    padding: 2,
+  },
+  detentPill: {
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 6,
+  },
+  detentPillActive: {
+    backgroundColor: '#2d6a4f',
+  },
+  detentPillText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#495057',
+  },
+  detentPillTextActive: {
+    color: '#ffffff',
+  },
   listContent: {
-    padding: 16,
-    paddingBottom: 40,
+    paddingHorizontal: 16,
+    paddingTop: 8,
+    paddingBottom: 90,
+  },
+  sectionHeader: {
+    marginTop: 12,
+    marginBottom: 10,
+    paddingHorizontal: 4,
+  },
+  sectionTitle: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#1b4332',
+  },
+  sectionSubtitle: {
+    fontSize: 12,
+    color: '#6c757d',
+    marginTop: 2,
   },
 });

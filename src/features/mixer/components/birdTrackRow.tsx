@@ -1,4 +1,4 @@
-import React, { useMemo, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   LayoutChangeEvent,
@@ -14,6 +14,8 @@ import { BirdTrackState } from '../../../domain/soundscape';
 interface BirdTrackRowProps {
   species: BirdSpecies;
   trackState?: BirdTrackState;
+  isFavorite: boolean;
+  onToggleFavorite: (speciesId: string) => void;
   onStart: (speciesId: string, recording: Recording) => void;
   onPause: (speciesId: string) => void;
   onResume: (speciesId: string) => void;
@@ -24,6 +26,8 @@ interface BirdTrackRowProps {
 export function BirdTrackRow({
   species,
   trackState,
+  isFavorite,
+  onToggleFavorite,
   onStart,
   onPause,
   onResume,
@@ -31,8 +35,15 @@ export function BirdTrackRow({
   onVolumeChange,
 }: BirdTrackRowProps) {
   const [selectedRecId, setSelectedRecId] = useState<string>(
-    species.recordings[0]?.recId ?? ''
+    trackState?.activeRecId ?? species.recordings[0]?.recId ?? ''
   );
+
+  // Keep selected clip synced if card remounts when moving between sections
+  useEffect(() => {
+    if (trackState?.activeRecId) {
+      setSelectedRecId(trackState.activeRecId);
+    }
+  }, [trackState?.activeRecId]);
 
   const selectedClip = useMemo(
     () =>
@@ -108,35 +119,60 @@ export function BirdTrackRow({
         isPaused && styles.cardPaused,
       ]}
     >
-      {/* Top Row: Bird Info & Playback Status */}
+      {/* Top Row: Bird Info, Status Badge & Favorite Button */}
       <View style={styles.headerRow}>
         <View style={styles.titleColumn}>
           <Text style={styles.title}>{species.displayName}</Text>
           <Text style={styles.scientific}>{species.speciesScientific}</Text>
         </View>
 
-        <View
-          style={[
-            styles.statusBadge,
-            isPaused && styles.statusBadgePaused,
-          ]}
-        >
-          {isLoading && (
-            <ActivityIndicator
-              size="small"
-              color="#2d6a4f"
-              style={styles.spinner}
-            />
-          )}
-          <Text
+        <View style={styles.headerRightActions}>
+          <View
             style={[
-              styles.statusText,
-              isPlaying && styles.statusTextPlaying,
-              isPaused && styles.statusTextPaused,
+              styles.statusBadge,
+              isPaused && styles.statusBadgePaused,
             ]}
           >
-            {status.toUpperCase()}
-          </Text>
+            {isLoading && (
+              <ActivityIndicator
+                size="small"
+                color="#2d6a4f"
+                style={styles.spinner}
+              />
+            )}
+            <Text
+              style={[
+                styles.statusText,
+                isPlaying && styles.statusTextPlaying,
+                isPaused && styles.statusTextPaused,
+              ]}
+            >
+              {status.toUpperCase()}
+            </Text>
+          </View>
+
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={
+              isFavorite ? 'Remove from favorites' : 'Add to favorites'
+            }
+            hitSlop={8}
+            onPress={() => onToggleFavorite(species.speciesId)}
+            style={({ pressed }) => [
+              styles.favoriteButton,
+              isFavorite && styles.favoriteButtonActive,
+              pressed && styles.buttonPressed,
+            ]}
+          >
+            <Text
+              style={[
+                styles.favoriteIcon,
+                isFavorite && styles.favoriteIconActive,
+              ]}
+            >
+              {isFavorite ? '♥' : '♡'}
+            </Text>
+          </Pressable>
         </View>
       </View>
 
@@ -152,7 +188,6 @@ export function BirdTrackRow({
                 if (isPlaying) {
                   onStart(species.speciesId, rec);
                 } else if (isPaused) {
-                  // Reset paused state when switching to a different recording
                   onStop(species.speciesId);
                 }
               }}
@@ -282,6 +317,11 @@ const styles = StyleSheet.create({
     color: '#52796f',
     marginTop: 2,
   },
+  headerRightActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
   statusBadge: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -306,6 +346,24 @@ const styles = StyleSheet.create({
   },
   statusTextPaused: {
     color: '#b45309',
+  },
+  favoriteButton: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: '#f1f5f2',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  favoriteButtonActive: {
+    backgroundColor: '#ffe3e3',
+  },
+  favoriteIcon: {
+    fontSize: 17,
+    color: '#6c757d',
+  },
+  favoriteIconActive: {
+    color: '#e03131',
   },
   chipsRow: {
     flexDirection: 'row',

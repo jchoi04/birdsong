@@ -14,7 +14,9 @@ import { BirdTrackState } from '../../../domain/soundscape';
 interface BirdTrackRowProps {
   species: BirdSpecies;
   trackState?: BirdTrackState;
-  onPlay: (speciesId: string, recording: Recording) => void;
+  onStart: (speciesId: string, recording: Recording) => void;
+  onPause: (speciesId: string) => void;
+  onResume: (speciesId: string) => void;
   onStop: (speciesId: string) => void;
   onVolumeChange: (speciesId: string, volume: number) => void;
 }
@@ -22,7 +24,9 @@ interface BirdTrackRowProps {
 export function BirdTrackRow({
   species,
   trackState,
-  onPlay,
+  onStart,
+  onPause,
+  onResume,
   onStop,
   onVolumeChange,
 }: BirdTrackRowProps) {
@@ -43,6 +47,25 @@ export function BirdTrackRow({
 
   const isLoading = status === 'loading';
   const isPlaying = status === 'playing';
+  const isPaused = status === 'paused';
+  const canStop = isPlaying || isPaused || isLoading;
+
+  const primaryButtonLabel = isPlaying
+    ? 'Pause'
+    : isPaused
+      ? 'Resume'
+      : 'Start';
+
+  const handlePrimaryPress = () => {
+    if (!selectedClip) return;
+    if (isPlaying) {
+      onPause(species.speciesId);
+    } else if (isPaused) {
+      onResume(species.speciesId);
+    } else {
+      onStart(species.speciesId, selectedClip);
+    }
+  };
 
   // Horizontal Slider state & refs
   const sliderWidthRef = useRef<number>(1);
@@ -78,7 +101,13 @@ export function BirdTrackRow({
   if (!selectedClip) return null;
 
   return (
-    <View style={[styles.card, isPlaying && styles.cardActive]}>
+    <View
+      style={[
+        styles.card,
+        isPlaying && styles.cardPlaying,
+        isPaused && styles.cardPaused,
+      ]}
+    >
       {/* Top Row: Bird Info & Playback Status */}
       <View style={styles.headerRow}>
         <View style={styles.titleColumn}>
@@ -86,7 +115,12 @@ export function BirdTrackRow({
           <Text style={styles.scientific}>{species.speciesScientific}</Text>
         </View>
 
-        <View style={styles.statusBadge}>
+        <View
+          style={[
+            styles.statusBadge,
+            isPaused && styles.statusBadgePaused,
+          ]}
+        >
           {isLoading && (
             <ActivityIndicator
               size="small"
@@ -98,6 +132,7 @@ export function BirdTrackRow({
             style={[
               styles.statusText,
               isPlaying && styles.statusTextPlaying,
+              isPaused && styles.statusTextPaused,
             ]}
           >
             {status.toUpperCase()}
@@ -105,7 +140,7 @@ export function BirdTrackRow({
         </View>
       </View>
 
-      {/* Recording Type Chips (Song, Call, Drumming, etc.) */}
+      {/* Recording Type Chips */}
       <View style={styles.chipsRow}>
         {species.recordings.map((rec) => {
           const isSelected = rec.recId === selectedClip.recId;
@@ -115,7 +150,10 @@ export function BirdTrackRow({
               onPress={() => {
                 setSelectedRecId(rec.recId);
                 if (isPlaying) {
-                  onPlay(species.speciesId, rec);
+                  onStart(species.speciesId, rec);
+                } else if (isPaused) {
+                  // Reset paused state when switching to a different recording
+                  onStop(species.speciesId);
                 }
               }}
               style={[styles.chip, isSelected && styles.chipSelected]}
@@ -167,33 +205,31 @@ export function BirdTrackRow({
         </View>
       ) : null}
 
-      {/* Play / Stop Controls */}
+      {/* Start/Pause/Resume + Stop Controls */}
       <View style={styles.controlsRow}>
         <Pressable
           accessibilityRole="button"
           disabled={isLoading}
-          onPress={() => onPlay(species.speciesId, selectedClip)}
+          onPress={handlePrimaryPress}
           style={({ pressed }) => [
             styles.button,
-            styles.playButton,
+            isPlaying ? styles.pauseButton : styles.startButton,
             isLoading && styles.buttonDisabled,
             pressed && !isLoading && styles.buttonPressed,
           ]}
         >
-          <Text style={styles.buttonText}>
-            {isPlaying ? 'Restart' : 'Play'}
-          </Text>
+          <Text style={styles.buttonText}>{primaryButtonLabel}</Text>
         </Pressable>
 
         <Pressable
           accessibilityRole="button"
-          disabled={!isPlaying && !isLoading}
+          disabled={!canStop}
           onPress={() => onStop(species.speciesId)}
           style={({ pressed }) => [
             styles.button,
             styles.stopButton,
-            !isPlaying && !isLoading && styles.buttonDisabled,
-            pressed && (isPlaying || isLoading) && styles.buttonPressed,
+            !canStop && styles.buttonDisabled,
+            pressed && canStop && styles.buttonPressed,
           ]}
         >
           <Text style={styles.buttonText}>Stop</Text>
@@ -217,9 +253,13 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 2 },
     elevation: 2,
   },
-  cardActive: {
+  cardPlaying: {
     borderColor: '#2d6a4f',
     backgroundColor: '#f8fbf9',
+  },
+  cardPaused: {
+    borderColor: '#d97706',
+    backgroundColor: '#fffdf9',
   },
   headerRow: {
     flexDirection: 'row',
@@ -250,6 +290,9 @@ const styles = StyleSheet.create({
     paddingVertical: 4,
     borderRadius: 999,
   },
+  statusBadgePaused: {
+    backgroundColor: '#fef3c7',
+  },
   spinner: {
     marginRight: 6,
   },
@@ -260,6 +303,9 @@ const styles = StyleSheet.create({
   },
   statusTextPlaying: {
     color: '#2d6a4f',
+  },
+  statusTextPaused: {
+    color: '#b45309',
   },
   chipsRow: {
     flexDirection: 'row',
@@ -356,8 +402,11 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     alignItems: 'center',
   },
-  playButton: {
+  startButton: {
     backgroundColor: '#2d6a4f',
+  },
+  pauseButton: {
+    backgroundColor: '#d97706',
   },
   stopButton: {
     backgroundColor: '#ae2012',

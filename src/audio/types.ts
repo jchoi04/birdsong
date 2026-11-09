@@ -1,24 +1,33 @@
 import { Recording } from '../domain/bird';
 import { BirdTrackState } from '../domain/soundscape';
 
-export type PlaybackStatus = 'idle' | 'loading' | 'playing' | 'stopped' | 'error';
+export type PlaybackStatus =
+  | 'idle'
+  | 'loading'
+  | 'playing'
+  | 'paused'
+  | 'stopped'
+  | 'error';
 
 export interface AudioEngineState {
-  /** Keyed by speciesId so multiple birds can play simultaneously */
   tracks: Record<string, BirdTrackState>;
 }
 
 export type AudioEngineListener = (state: AudioEngineState) => void;
 
 export interface AudioEngine {
-  /** Plays a clip for a specific bird track without stopping other birds. */
+  /** Starts a clip from the beginning and loops it continuously. */
   playTrack(
     speciesId: string,
     recording: Pick<Recording, 'recId' | 'assetId'>
   ): Promise<void>;
-  /** Stops playback for a single bird track. */
+  /** Pauses a currently playing bird track and preserves its playback position. */
+  pauseTrack(speciesId: string): Promise<void>;
+  /** Resumes a paused bird track from where it left off. */
+  resumeTrack(speciesId: string): Promise<void>;
+  /** Stops playback for a single bird track and resets its position to 0. */
   stopTrack(speciesId: string): Promise<void>;
-  /** Stops all currently playing bird tracks. */
+  /** Stops and resets all bird tracks. */
   stopAll(): Promise<void>;
   /** Sets the volume (0.0 to 1.0) for a specific bird track in real time. */
   setTrackVolume(speciesId: string, volume: number): void;

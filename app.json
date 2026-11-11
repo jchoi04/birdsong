@@ -39,7 +39,10 @@
           "imageWidth": 76
         }
       ],
-      "react-native-audio-api"
+      "react-native-audio-api",
+      "expo-image",
+      "expo-status-bar",
+      "expo-web-browser"
     ],
     "experiments": {
       "typedRoutes": true,
